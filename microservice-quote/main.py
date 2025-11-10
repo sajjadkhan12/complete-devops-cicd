@@ -1,6 +1,16 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
+import os
 import random
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Get secrets from environment variables
+API_SECRET_KEY = os.getenv("API_SECRET_KEY", "default-secret-key")
+SERVICE_NAME = os.getenv("SERVICE_NAME", "Quote Service")
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "default-admin-token")
 
 app = FastAPI(title="Quote API", description="A simple API that returns random inspirational quotes")
 
@@ -94,5 +104,20 @@ async def get_all_quotes():
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
-    return {"status": "healthy"}
+    return {
+        "status": "healthy",
+        "service": SERVICE_NAME,
+        "api_key_configured": API_SECRET_KEY != "default-secret-key"
+    }
+
+
+@app.get("/config")
+async def get_config():
+    """Get service configuration (admin only - demonstrates secret usage)"""
+    # In a real app, you'd verify the admin token from request headers
+    return {
+        "service_name": SERVICE_NAME,
+        "api_secret_configured": bool(API_SECRET_KEY),
+        "admin_token_configured": bool(ADMIN_TOKEN)
+    }
 
