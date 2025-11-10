@@ -1,0 +1,120 @@
+name: Update Kustomize Manifests
+
+on:
+  workflow_run:
+    workflows: ["CI - Build and Push Images"]
+    types:
+      - completed
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Image tag to use (default: latest commit SHA)'
+        required: false
+        type: string
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REGION: ${{ secrets.GCP_REGION }}
+  REPOSITORY: ${{ secrets.ARTIFACT_REGISTRY_REPO }}
+
+jobs:
+  update-manifests:
+    name: Update Kustomize Image Tags
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    permissions:
+      contents: write
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Get GCP Configuration
+        id: gcp-config
+        run: |
+          PROJECT_ID=$(gcloud config get-value project)
+          REGION=$(gcloud config get-value compute/region 2>/dev/null || echo "")
+          REGION=${REGION:-${{ env.REGION || 'us-central1' }}}
+          REPO="${{ env.REPOSITORY || 'microservice-registery' }}"
+          echo "project_id=$PROJECT_ID" >> $GITHUB_OUTPUT
+          echo "region=$REGION" >> $GITHUB_OUTPUT
+          echo "repo=$REPO" >> $GITHUB_OUTPUT
+
+      - name: Determine image tag
+        id: image-tag
+        run: |
+          if [ "${{ github.event.inputs.image_tag }}" != "" ]; then
+            IMAGE_TAG="${{ github.event.inputs.image_tag }}"
+          elif [ "${{ github.event.workflow_run.head_sha }}" != "" ]; then
+            IMAGE_TAG="${{ github.event.workflow_run.head_sha }}"
+          else
+            IMAGE_TAG="${{ github.sha }}"
+          fi
+          echo "tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
+          echo "Using image tag: $IMAGE_TAG"
+
+      - name: Update Kustomize manifests
+        env:
+          REGION: ${{ steps.gcp-config.outputs.region }}
+          PROJECT_ID: ${{ steps.gcp-config.outputs.project_id }}
+          REPO: ${{ steps.gcp-config.outputs.repo }}
+          TAG: ${{ steps.image-tag.outputs.tag }}
+        run: |
+          python3 << 'PYEOF'
+          import yaml
+          import os
+          
+          region = os.environ['REGION']
+          project_id = os.environ['PROJECT_ID']
+          repo = os.environ['REPO']
+          tag = os.environ['TAG']
+          
+          overlays = [
+              ('k8s/overlays/dev', 'dev'),
+              ('k8s/overlays/stg', 'staging'),
+              ('k8s/overlays/prd', 'production')
+          ]
+          
+          for overlay_path, env_name in overlays:
+              with open(f"{overlay_path}/kustomization.yaml", 'r') as f:
+                  kustomization = yaml.safe_load(f)
+              
+              # Update images
+              kustomization['images'] = [
+                  {
+                      'name': f'{region}-docker.pkg.dev/{project_id}/{repo}/poem-service',
+                      'newName': f'{region}-docker.pkg.dev/{project_id}/{repo}/poem-service',
+                      'newTag': tag
+                  },
+                  {
+                      'name': f'{region}-docker.pkg.dev/{project_id}/{repo}/quote-service',
+                      'newName': f'{region}-docker.pkg.dev/{project_id}/{repo}/quote-service',
+                      'newTag': tag
+                  },
+                  {
+                      'name': f'{region}-docker.pkg.dev/{project_id}/{repo}/frontend',
+                      'newName': f'{region}-docker.pkg.dev/{project_id}/{repo}/frontend',
+                      'newTag': tag
+                  }
+              ]
+              
+              with open(f"{overlay_path}/kustomization.yaml", 'w') as f:
+                  yaml.dump(kustomization, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+              
+              print(f"Updated {env_name} overlay with tag: {tag}")
+          PYEOF
+
+      - name: Commit and push changes
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add k8s/overlays/*/kustomization.yaml
+          git diff --staged --quiet || git commit -m "chore: update image tags to ${{ steps.image-tag.outputs.tag }} [skip ci]"
+          git push
+

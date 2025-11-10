@@ -1,0 +1,42 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: microservices-stg
+
+resources:
+  - ../../base
+
+namePrefix: ""
+nameSuffix: ""
+
+commonLabels:
+  environment: stg
+  app.kubernetes.io/environment: stg
+
+images:
+  - name: us-central1-docker.pkg.dev/PROJECT_ID/microservice-registery/poem-service
+    newName: us-central1-docker.pkg.dev/PROJECT_ID/microservice-registery/poem-service
+    newTag: latest
+  - name: us-central1-docker.pkg.dev/PROJECT_ID/microservice-registery/quote-service
+    newName: us-central1-docker.pkg.dev/PROJECT_ID/microservice-registery/quote-service
+    newTag: latest
+  - name: us-central1-docker.pkg.dev/PROJECT_ID/microservice-registery/frontend
+    newName: us-central1-docker.pkg.dev/PROJECT_ID/microservice-registery/frontend
+    newTag: latest
+
+patches:
+  - path: namespace-patch.yaml
+    target:
+      kind: Namespace
+  - path: configmap-patch.yaml
+    target:
+      kind: ConfigMap
+
+replicas:
+  - name: poem-service
+    count: 2
+  - name: quote-service
+    count: 2
+  - name: frontend
+    count: 2
+
