@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  poem-service:
+    build:
+      context: ./microservice-poem
+      dockerfile: Dockerfile
+    container_name: poem-service
+    ports:
+      - "8000:8000"
+    environment:
+      - API_SECRET_KEY=${POEM_API_SECRET_KEY:-poem-secret-key-12345-abcdef}
+      - SERVICE_NAME=${POEM_SERVICE_NAME:-Poem Microservice}
+      - ADMIN_TOKEN=${POEM_ADMIN_TOKEN:-poem-admin-token-xyz789}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+  quote-service:
+    build:
+      context: ./microservice-quote
+      dockerfile: Dockerfile
+    container_name: quote-service
+    ports:
+      - "8001:8001"
+    environment:
+      - API_SECRET_KEY=${QUOTE_API_SECRET_KEY:-quote-secret-key-67890-ghijkl}
+      - SERVICE_NAME=${QUOTE_SERVICE_NAME:-Quote Microservice}
+      - ADMIN_TOKEN=${QUOTE_ADMIN_TOKEN:-quote-admin-token-abc123}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - poem-service
+      - quote-service
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+

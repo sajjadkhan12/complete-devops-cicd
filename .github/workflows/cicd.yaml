@@ -1,0 +1,138 @@
+name: Build and Deploy to GKE
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  GKE_CLUSTER: ${{ secrets.GKE_CLUSTER_NAME }}
+  GKE_ZONE: 'us-central1-a'
+  REGION: 'us-central1'
+  REPOSITORY: complete-devops-cicd
+  IMAGE_TAG: ${{ github.sha }}
+  WIF_PROVIDER: ${{ secrets.WIF_PROVIDER }}
+  WIF_SERVICE_ACCOUNT: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+jobs:
+  build-and-push:
+    name: Build and Push Docker Images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write  # Required for Workload Identity
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud using Workload Identity
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: |
+          gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev
+
+      - name: Build and push Poem Service
+        working-directory: ./microservice-poem
+        run: |
+          docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/poem-service:${{ env.IMAGE_TAG }} .
+          docker tag ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/poem-service:${{ env.IMAGE_TAG }} ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/poem-service:latest
+          docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/poem-service:${{ env.IMAGE_TAG }}
+          docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/poem-service:latest
+
+      - name: Build and push Quote Service
+        working-directory: ./microservice-quote
+        run: |
+          docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/quote-service:${{ env.IMAGE_TAG }} .
+          docker tag ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/quote-service:${{ env.IMAGE_TAG }} ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/quote-service:latest
+          docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/quote-service:${{ env.IMAGE_TAG }}
+          docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/quote-service:latest
+
+      - name: Build and push Frontend
+        working-directory: ./frontend
+        run: |
+          docker build -t ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend:${{ env.IMAGE_TAG }} .
+          docker tag ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend:${{ env.IMAGE_TAG }} ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend:latest
+          docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend:${{ env.IMAGE_TAG }}
+          docker push ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend:latest
+
+  deploy:
+    name: Deploy to GKE
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      id-token: write  # Required for Workload Identity
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud using Workload Identity
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Set up kubectl
+        run: |
+          gcloud container clusters get-credentials ${{ env.GKE_CLUSTER }} \
+            --zone ${{ env.GKE_ZONE }} \
+            --project ${{ env.PROJECT_ID }}
+
+      - name: Create namespace if not exists
+        run: |
+          kubectl create namespace microservices --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Create/Update Secrets
+        run: |
+          kubectl create secret generic poem-secrets \
+            --from-literal=API_SECRET_KEY="${{ secrets.POEM_API_SECRET_KEY }}" \
+            --from-literal=ADMIN_TOKEN="${{ secrets.POEM_ADMIN_TOKEN }}" \
+            --namespace=microservices \
+            --dry-run=client -o yaml | kubectl apply -f -
+          
+          kubectl create secret generic quote-secrets \
+            --from-literal=API_SECRET_KEY="${{ secrets.QUOTE_API_SECRET_KEY }}" \
+            --from-literal=ADMIN_TOKEN="${{ secrets.QUOTE_ADMIN_TOKEN }}" \
+            --namespace=microservices \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Deploy to GKE
+        run: |
+          # Replace image tags in manifests
+          sed -i "s|IMAGE_TAG|${{ env.IMAGE_TAG }}|g" k8s/*.yaml
+          sed -i "s|PROJECT_ID|${{ env.PROJECT_ID }}|g" k8s/*.yaml
+          sed -i "s|REGION|${{ env.REGION }}|g" k8s/*.yaml
+          
+          # Apply manifests
+          kubectl apply -f k8s/namespace.yaml
+          kubectl apply -f k8s/secrets.yaml
+          kubectl apply -f k8s/configmap.yaml
+          kubectl apply -f k8s/poem-deployment.yaml
+          kubectl apply -f k8s/quote-deployment.yaml
+          kubectl apply -f k8s/frontend-deployment.yaml
+          kubectl apply -f k8s/ingress.yaml
+
+      - name: Verify deployment
+        run: |
+          kubectl rollout status deployment/poem-service -n microservices
+          kubectl rollout status deployment/quote-service -n microservices
+          kubectl rollout status deployment/frontend -n microservices
+          kubectl get pods -n microservices
