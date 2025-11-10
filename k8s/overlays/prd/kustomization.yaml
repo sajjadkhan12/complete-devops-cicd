@@ -11,13 +11,13 @@ commonLabels:
 images:
 - name: us-central1-docker.pkg.dev//microservice-registery/poem-service
   newName: us-central1-docker.pkg.dev//microservice-registery/poem-service
-  newTag: 96b3000637b7828b6054b40eff35c253c7b8768d
+  newTag: 379ac09e0d3de66a787e825c7a6b38d16a32aca8
 - name: us-central1-docker.pkg.dev//microservice-registery/quote-service
   newName: us-central1-docker.pkg.dev//microservice-registery/quote-service
-  newTag: 96b3000637b7828b6054b40eff35c253c7b8768d
+  newTag: 379ac09e0d3de66a787e825c7a6b38d16a32aca8
 - name: us-central1-docker.pkg.dev//microservice-registery/frontend
   newName: us-central1-docker.pkg.dev//microservice-registery/frontend
-  newTag: 96b3000637b7828b6054b40eff35c253c7b8768d
+  newTag: 379ac09e0d3de66a787e825c7a6b38d16a32aca8
 patches:
 - path: namespace-patch.yaml
   target:
