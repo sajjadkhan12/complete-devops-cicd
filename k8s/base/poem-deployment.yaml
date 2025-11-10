@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
       - name: poem-service
-        image: us-central1-docker.pkg.dev/PROJECT_ID/microservice-registery/poem-service:latest
+        image: us-central1-docker.pkg.dev/fast-pagoda-474409-c7/microservice-registery/poem-service:latest
         ports:
         - containerPort: 8000
         env:

@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
       - name: quote-service
-        image: us-central1-docker.pkg.dev/PROJECT_ID/microservice-registery/quote-service:latest
+        image: us-central1-docker.pkg.dev/fast-pagoda-474409-c7/microservice-registery/quote-service:latest
         ports:
         - containerPort: 8001
         env:

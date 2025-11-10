@@ -16,13 +16,13 @@ commonLabels:
   app.kubernetes.io/part-of: microservices
 
 images:
-  - name: us-central1-docker.pkg.dev/PROJECT_ID/microservice-registery/poem-service
-    newName: us-central1-docker.pkg.dev/PROJECT_ID/microservice-registery/poem-service
+  - name: us-central1-docker.pkg.dev/fast-pagoda-474409-c7/microservice-registery/poem-service
+    newName: us-central1-docker.pkg.dev/fast-pagoda-474409-c7/microservice-registery/poem-service
     newTag: latest
-  - name: us-central1-docker.pkg.dev/PROJECT_ID/microservice-registery/quote-service
-    newName: us-central1-docker.pkg.dev/PROJECT_ID/microservice-registery/quote-service
+  - name: us-central1-docker.pkg.dev/fast-pagoda-474409-c7/microservice-registery/quote-service
+    newName: us-central1-docker.pkg.dev/fast-pagoda-474409-c7/microservice-registery/quote-service
     newTag: latest
-  - name: us-central1-docker.pkg.dev/PROJECT_ID/microservice-registery/frontend
-    newName: us-central1-docker.pkg.dev/PROJECT_ID/microservice-registery/frontend
+  - name: us-central1-docker.pkg.dev/fast-pagoda-474409-c7/microservice-registery/frontend
+    newName: us-central1-docker.pkg.dev/fast-pagoda-474409-c7/microservice-registery/frontend
     newTag: latest
 
