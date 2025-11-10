@@ -109,18 +109,15 @@ jobs:
           docker push ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/frontend:${TAG}
           docker push ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/frontend:latest
 
-  deploy-dev-stg:
-    name: Deploy to Dev and Staging
+  deploy-dev:
+    name: Deploy to Development
     needs: build-and-push
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request'
     permissions:
       contents: read
       id-token: write  # Required for Workload Identity
-    strategy:
-      matrix:
-        environment: [dev, stg]
-    environment: ${{ matrix.environment }}
+    environment: dev
 
     steps:
       - name: Checkout code
@@ -154,6 +151,10 @@ jobs:
           echo "Detected Zone: $ZONE"
           echo "Repository: $REPO"
 
+      - name: Install gke-gcloud-auth-plugin
+        run: |
+          gcloud components install gke-gcloud-auth-plugin --quiet
+
       - name: Set up kubectl
         run: |
           gcloud container clusters get-credentials ${{ env.GKE_CLUSTER }} \
@@ -163,7 +164,7 @@ jobs:
       - name: Set environment variables
         id: env-vars
         run: |
-          ENV="${{ matrix.environment }}"
+          ENV="dev"
           NAMESPACE="microservices-${ENV}"
           echo "namespace=${NAMESPACE}" >> $GITHUB_OUTPUT
           echo "environment=${ENV}" >> $GITHUB_OUTPUT
@@ -176,14 +177,14 @@ jobs:
 
       - name: Create/Update Secrets
         run: |
-          ENV="${{ matrix.environment }}"
+          ENV="dev"
           NAMESPACE="${{ steps.env-vars.outputs.namespace }}"
           
           # Use environment-specific secrets if available, otherwise use default
-          POEM_SECRET_KEY="${{ secrets[format('POEM_API_SECRET_KEY_{0}', matrix.environment)] || secrets.POEM_API_SECRET_KEY }}"
-          POEM_ADMIN_TOKEN="${{ secrets[format('POEM_ADMIN_TOKEN_{0}', matrix.environment)] || secrets.POEM_ADMIN_TOKEN }}"
-          QUOTE_SECRET_KEY="${{ secrets[format('QUOTE_API_SECRET_KEY_{0}', matrix.environment)] || secrets.QUOTE_API_SECRET_KEY }}"
-          QUOTE_ADMIN_TOKEN="${{ secrets[format('QUOTE_ADMIN_TOKEN_{0}', matrix.environment)] || secrets.QUOTE_ADMIN_TOKEN }}"
+          POEM_SECRET_KEY="${{ secrets.POEM_API_SECRET_KEY_DEV || secrets.POEM_API_SECRET_KEY }}"
+          POEM_ADMIN_TOKEN="${{ secrets.POEM_ADMIN_TOKEN_DEV || secrets.POEM_ADMIN_TOKEN }}"
+          QUOTE_SECRET_KEY="${{ secrets.QUOTE_API_SECRET_KEY_DEV || secrets.QUOTE_API_SECRET_KEY }}"
+          QUOTE_ADMIN_TOKEN="${{ secrets.QUOTE_ADMIN_TOKEN_DEV || secrets.QUOTE_ADMIN_TOKEN }}"
           
           kubectl create secret generic poem-secrets \
             --from-literal=API_SECRET_KEY="${POEM_SECRET_KEY}" \
@@ -199,7 +200,7 @@ jobs:
 
       - name: Deploy to GKE
         run: |
-          ENV="${{ matrix.environment }}"
+          ENV="dev"
           NAMESPACE="${{ steps.env-vars.outputs.namespace }}"
           PROJECT_ID="${{ steps.gcp-config.outputs.project_id }}"
           REGION="${{ steps.gcp-config.outputs.region }}"
@@ -232,7 +233,135 @@ jobs:
           kubectl rollout status deployment/quote-service -n ${NAMESPACE} --timeout=5m
           kubectl rollout status deployment/frontend -n ${NAMESPACE} --timeout=5m
           kubectl get pods -n ${NAMESPACE}
-          echo "✓ Deployment to ${{ matrix.environment }} environment completed successfully"
+          echo "✓ Deployment to dev environment completed successfully"
+
+  deploy-stg:
+    name: Deploy to Staging
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      id-token: write  # Required for Workload Identity
+    environment: 
+      name: stg
+      url: https://your-staging-url.com  # Update with your staging URL
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud using Workload Identity
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Get GCP Configuration
+        id: gcp-config
+        run: |
+          PROJECT_ID=$(gcloud config get-value project)
+          REGION=$(gcloud config get-value compute/region 2>/dev/null || echo "")
+          ZONE=$(gcloud config get-value compute/zone 2>/dev/null || echo "")
+          # Use env vars or defaults
+          REGION=${REGION:-${{ env.REGION || 'us-central1' }}}
+          ZONE=${ZONE:-${{ env.GKE_ZONE || 'us-central1-a' }}}
+          REPO="${{ env.REPOSITORY || 'microservice-registery' }}"
+          echo "project_id=$PROJECT_ID" >> $GITHUB_OUTPUT
+          echo "region=$REGION" >> $GITHUB_OUTPUT
+          echo "zone=$ZONE" >> $GITHUB_OUTPUT
+          echo "repo=$REPO" >> $GITHUB_OUTPUT
+          echo "Detected Project: $PROJECT_ID"
+          echo "Detected Region: $REGION"
+          echo "Detected Zone: $ZONE"
+          echo "Repository: $REPO"
+
+      - name: Install gke-gcloud-auth-plugin
+        run: |
+          gcloud components install gke-gcloud-auth-plugin --quiet
+
+      - name: Set up kubectl
+        run: |
+          gcloud container clusters get-credentials ${{ env.GKE_CLUSTER }} \
+            --zone ${{ steps.gcp-config.outputs.zone }} \
+            --project ${{ steps.gcp-config.outputs.project_id }}
+
+      - name: Set environment variables
+        id: env-vars
+        run: |
+          ENV="stg"
+          NAMESPACE="microservices-${ENV}"
+          echo "namespace=${NAMESPACE}" >> $GITHUB_OUTPUT
+          echo "environment=${ENV}" >> $GITHUB_OUTPUT
+          echo "Deploying to environment: ${ENV}"
+          echo "Namespace: ${NAMESPACE}"
+
+      - name: Create namespace if not exists
+        run: |
+          kubectl create namespace ${{ steps.env-vars.outputs.namespace }} --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Create/Update Secrets
+        run: |
+          ENV="stg"
+          NAMESPACE="${{ steps.env-vars.outputs.namespace }}"
+          
+          # Use environment-specific secrets if available, otherwise use default
+          POEM_SECRET_KEY="${{ secrets.POEM_API_SECRET_KEY_STG || secrets.POEM_API_SECRET_KEY }}"
+          POEM_ADMIN_TOKEN="${{ secrets.POEM_ADMIN_TOKEN_STG || secrets.POEM_ADMIN_TOKEN }}"
+          QUOTE_SECRET_KEY="${{ secrets.QUOTE_API_SECRET_KEY_STG || secrets.QUOTE_API_SECRET_KEY }}"
+          QUOTE_ADMIN_TOKEN="${{ secrets.QUOTE_ADMIN_TOKEN_STG || secrets.QUOTE_ADMIN_TOKEN }}"
+          
+          kubectl create secret generic poem-secrets \
+            --from-literal=API_SECRET_KEY="${POEM_SECRET_KEY}" \
+            --from-literal=ADMIN_TOKEN="${POEM_ADMIN_TOKEN}" \
+            --namespace=${NAMESPACE} \
+            --dry-run=client -o yaml | kubectl apply -f -
+          
+          kubectl create secret generic quote-secrets \
+            --from-literal=API_SECRET_KEY="${QUOTE_SECRET_KEY}" \
+            --from-literal=ADMIN_TOKEN="${QUOTE_ADMIN_TOKEN}" \
+            --namespace=${NAMESPACE} \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Deploy to GKE
+        run: |
+          ENV="stg"
+          NAMESPACE="${{ steps.env-vars.outputs.namespace }}"
+          PROJECT_ID="${{ steps.gcp-config.outputs.project_id }}"
+          REGION="${{ steps.gcp-config.outputs.region }}"
+          REPO="${{ steps.gcp-config.outputs.repo }}"
+          TAG="${{ env.IMAGE_TAG }}"
+          
+          # Create temporary directory for environment-specific manifests
+          mkdir -p k8s-temp
+          cp -r k8s/* k8s-temp/
+          
+          # Replace placeholders in manifests
+          find k8s-temp -type f -name "*.yaml" -exec sed -i "s|IMAGE_TAG|${TAG}|g" {} \;
+          find k8s-temp -type f -name "*.yaml" -exec sed -i "s|PROJECT_ID|${PROJECT_ID}|g" {} \;
+          find k8s-temp -type f -name "*.yaml" -exec sed -i "s|REGION|${REGION}|g" {} \;
+          find k8s-temp -type f -name "*.yaml" -exec sed -i "s|NAMESPACE|${NAMESPACE}|g" {} \;
+          
+          # Apply manifests
+          kubectl apply -f k8s-temp/namespace.yaml
+          kubectl apply -f k8s-temp/secrets.yaml
+          kubectl apply -f k8s-temp/configmap.yaml
+          kubectl apply -f k8s-temp/poem-deployment.yaml
+          kubectl apply -f k8s-temp/quote-deployment.yaml
+          kubectl apply -f k8s-temp/frontend-deployment.yaml
+          kubectl apply -f k8s-temp/ingress.yaml
+
+      - name: Verify deployment
+        run: |
+          NAMESPACE="${{ steps.env-vars.outputs.namespace }}"
+          kubectl rollout status deployment/poem-service -n ${NAMESPACE} --timeout=5m
+          kubectl rollout status deployment/quote-service -n ${NAMESPACE} --timeout=5m
+          kubectl rollout status deployment/frontend -n ${NAMESPACE} --timeout=5m
+          kubectl get pods -n ${NAMESPACE}
+          echo "✓ Deployment to staging environment completed successfully"
 
   deploy-prd:
     name: Deploy to Production
@@ -277,6 +406,10 @@ jobs:
           echo "Detected Region: $REGION"
           echo "Detected Zone: $ZONE"
           echo "Repository: $REPO"
+
+      - name: Install gke-gcloud-auth-plugin
+        run: |
+          gcloud components install gke-gcloud-auth-plugin --quiet
 
       - name: Set up kubectl
         run: |
