@@ -61,8 +61,10 @@ export default {
       this.loadingPoem = true
       this.poemError = null
       try {
-        const apiUrl = import.meta.env.VITE_POEM_API_URL || 'http://localhost:8000'
-        const response = await axios.get(`${apiUrl}/poem`)
+        // Use environment variable or default to relative path (for nginx proxy)
+        const apiUrl = import.meta.env.VITE_POEM_API_URL || '/api/poem'
+        const url = apiUrl.startsWith('http') ? `${apiUrl}/poem` : `${apiUrl}/poem`
+        const response = await axios.get(url)
         this.poem = response.data
       } catch (error) {
         this.poemError = `Error fetching poem: ${error.message}. Make sure the poem microservice is running.`
@@ -75,8 +77,10 @@ export default {
       this.loadingQuote = true
       this.quoteError = null
       try {
-        const apiUrl = import.meta.env.VITE_QUOTE_API_URL || 'http://localhost:8001'
-        const response = await axios.get(`${apiUrl}/quote`)
+        // Use environment variable or default to relative path (for nginx proxy)
+        const apiUrl = import.meta.env.VITE_QUOTE_API_URL || '/api/quote'
+        const url = apiUrl.startsWith('http') ? `${apiUrl}/quote` : `${apiUrl}/quote`
+        const response = await axios.get(url)
         this.quote = response.data
       } catch (error) {
         this.quoteError = `Error fetching quote: ${error.message}. Make sure the quote microservice is running.`
