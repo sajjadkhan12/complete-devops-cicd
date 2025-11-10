@@ -25,24 +25,11 @@ COPY . .
 # Build the application
 RUN npm run build
 
-# Production stage - simple static file server
+# Production stage with nginx
 FROM nginx:alpine
 
-# Simple nginx config to serve static files
-RUN echo 'server { \
-    listen 80; \
-    server_name localhost; \
-    root /usr/share/nginx/html; \
-    index index.html; \
-    location / { \
-        try_files $uri $uri/ /index.html; \
-    } \
-    location /health { \
-        access_log off; \
-        return 200 "healthy\n"; \
-        add_header Content-Type text/plain; \
-    } \
-}' > /etc/nginx/conf.d/default.conf
+# Copy custom nginx config
+COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 # Copy built files from builder
 COPY --from=builder /app/dist /usr/share/nginx/html

@@ -13,25 +13,4 @@ metadata:
   namespace: NAMESPACE
 data:
   SERVICE_NAME: "Quote Microservice"
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: nginx-config
-  namespace: NAMESPACE
-data:
-  FRONTEND_SERVICE: "frontend"
-  POEM_SERVICE: "poem-service"
-  QUOTE_SERVICE: "quote-service"
-  POEM_PORT: "8000"
-  QUOTE_PORT: "8001"
----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: frontend-config
-  namespace: NAMESPACE
-data:
-  VITE_POEM_API_URL: "/api/poem"
-  VITE_QUOTE_API_URL: "/api/quote"
 

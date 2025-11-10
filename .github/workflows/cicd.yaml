@@ -113,18 +113,6 @@ jobs:
           docker push ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/frontend:${TAG}
           docker push ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/frontend:latest
 
-      - name: Build and push Nginx Proxy
-        working-directory: ./nginx-proxy
-        run: |
-          REGION="${{ steps.gcp-config.outputs.region }}"
-          PROJECT_ID="${{ steps.gcp-config.outputs.project_id }}"
-          REPO="${{ steps.gcp-config.outputs.repo }}"
-          TAG="${{ env.IMAGE_TAG }}"
-          docker build -t ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/nginx-proxy:${TAG} .
-          docker tag ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/nginx-proxy:${TAG} ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/nginx-proxy:latest
-          docker push ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/nginx-proxy:${TAG}
-          docker push ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/nginx-proxy:latest
-
   deploy-dev:
     name: Deploy to Development
     needs: build-and-push
@@ -252,7 +240,6 @@ jobs:
           kubectl apply -f k8s-temp/poem-deployment.yaml
           kubectl apply -f k8s-temp/quote-deployment.yaml
           kubectl apply -f k8s-temp/frontend-deployment.yaml
-          kubectl apply -f k8s-temp/nginx-proxy-deployment.yaml
           kubectl apply -f k8s-temp/ingress.yaml
 
       - name: Verify deployment
@@ -261,7 +248,6 @@ jobs:
           kubectl rollout status deployment/poem-service -n ${NAMESPACE} --timeout=5m
           kubectl rollout status deployment/quote-service -n ${NAMESPACE} --timeout=5m
           kubectl rollout status deployment/frontend -n ${NAMESPACE} --timeout=5m
-          kubectl rollout status deployment/nginx-proxy -n ${NAMESPACE} --timeout=5m
           kubectl get pods -n ${NAMESPACE}
           echo "✓ Deployment to dev environment completed successfully"
 
@@ -522,7 +508,6 @@ jobs:
           kubectl apply -f k8s-temp/poem-deployment.yaml
           kubectl apply -f k8s-temp/quote-deployment.yaml
           kubectl apply -f k8s-temp/frontend-deployment.yaml
-          kubectl apply -f k8s-temp/nginx-proxy-deployment.yaml
           kubectl apply -f k8s-temp/ingress.yaml
 
       - name: Verify deployment
@@ -531,6 +516,5 @@ jobs:
           kubectl rollout status deployment/poem-service -n ${NAMESPACE} --timeout=5m
           kubectl rollout status deployment/quote-service -n ${NAMESPACE} --timeout=5m
           kubectl rollout status deployment/frontend -n ${NAMESPACE} --timeout=5m
-          kubectl rollout status deployment/nginx-proxy -n ${NAMESPACE} --timeout=5m
           kubectl get pods -n ${NAMESPACE}
           echo "✓ Deployment to production environment completed successfully"
