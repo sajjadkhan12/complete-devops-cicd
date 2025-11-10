@@ -1,0 +1,520 @@
+name: Build and Deploy to GKE
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        type: choice
+        options:
+          - dev
+          - stg
+          - prd
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  GKE_CLUSTER: ${{ secrets.GKE_CLUSTER_NAME }}
+  GKE_ZONE: ${{ secrets.GKE_ZONE }}
+  REGION: ${{ secrets.GCP_REGION }}
+  REPOSITORY: ${{ secrets.ARTIFACT_REGISTRY_REPO }}
+  IMAGE_TAG: ${{ github.sha }}
+  WIF_PROVIDER: ${{ secrets.WIF_PROVIDER }}
+  WIF_SERVICE_ACCOUNT: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+jobs:
+  build-and-push:
+    name: Build and Push Docker Images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write  # Required for Workload Identity
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud using Workload Identity
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Get GCP Configuration
+        id: gcp-config
+        run: |
+          PROJECT_ID=$(gcloud config get-value project)
+          REGION=$(gcloud config get-value compute/region 2>/dev/null || echo "")
+          ZONE=$(gcloud config get-value compute/zone 2>/dev/null || echo "")
+          # Use env vars or defaults
+          REGION=${REGION:-${{ env.REGION || 'us-central1' }}}
+          ZONE=${ZONE:-${{ env.GKE_ZONE || 'us-central1-a' }}}
+          REPO="${{ env.REPOSITORY || 'microservice-registery' }}"
+          echo "project_id=$PROJECT_ID" >> $GITHUB_OUTPUT
+          echo "region=$REGION" >> $GITHUB_OUTPUT
+          echo "zone=$ZONE" >> $GITHUB_OUTPUT
+          echo "repo=$REPO" >> $GITHUB_OUTPUT
+          echo "Detected Project: $PROJECT_ID"
+          echo "Detected Region: $REGION"
+          echo "Detected Zone: $ZONE"
+          echo "Repository: $REPO"
+
+      - name: Configure Docker for Artifact Registry
+        run: |
+          REGION="${{ steps.gcp-config.outputs.region }}"
+          gcloud auth configure-docker ${REGION}-docker.pkg.dev
+
+      - name: Build and push Poem Service
+        working-directory: ./microservice-poem
+        run: |
+          REGION="${{ steps.gcp-config.outputs.region }}"
+          PROJECT_ID="${{ steps.gcp-config.outputs.project_id }}"
+          REPO="${{ steps.gcp-config.outputs.repo }}"
+          TAG="${{ env.IMAGE_TAG }}"
+          docker build -t ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/poem-service:${TAG} .
+          docker tag ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/poem-service:${TAG} ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/poem-service:latest
+          docker push ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/poem-service:${TAG}
+          docker push ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/poem-service:latest
+
+      - name: Build and push Quote Service
+        working-directory: ./microservice-quote
+        run: |
+          REGION="${{ steps.gcp-config.outputs.region }}"
+          PROJECT_ID="${{ steps.gcp-config.outputs.project_id }}"
+          REPO="${{ steps.gcp-config.outputs.repo }}"
+          TAG="${{ env.IMAGE_TAG }}"
+          docker build -t ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/quote-service:${TAG} .
+          docker tag ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/quote-service:${TAG} ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/quote-service:latest
+          docker push ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/quote-service:${TAG}
+          docker push ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/quote-service:latest
+
+      - name: Build and push Frontend
+        working-directory: ./frontend
+        run: |
+          REGION="${{ steps.gcp-config.outputs.region }}"
+          PROJECT_ID="${{ steps.gcp-config.outputs.project_id }}"
+          REPO="${{ steps.gcp-config.outputs.repo }}"
+          TAG="${{ env.IMAGE_TAG }}"
+          # Build with environment variables for Vite
+          docker build \
+            --build-arg VITE_POEM_API_URL="/api/poem" \
+            --build-arg VITE_QUOTE_API_URL="/api/quote" \
+            -t ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/frontend:${TAG} .
+          docker tag ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/frontend:${TAG} ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/frontend:latest
+          docker push ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/frontend:${TAG}
+          docker push ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/frontend:latest
+
+  deploy-dev:
+    name: Deploy to Development
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      id-token: write  # Required for Workload Identity
+    environment: dev
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud using Workload Identity
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Get GCP Configuration
+        id: gcp-config
+        run: |
+          PROJECT_ID=$(gcloud config get-value project)
+          REGION=$(gcloud config get-value compute/region 2>/dev/null || echo "")
+          ZONE=$(gcloud config get-value compute/zone 2>/dev/null || echo "")
+          # Use env vars or defaults
+          REGION=${REGION:-${{ env.REGION || 'us-central1' }}}
+          ZONE=${ZONE:-${{ env.GKE_ZONE || 'us-central1-a' }}}
+          REPO="${{ env.REPOSITORY || 'microservice-registery' }}"
+          echo "project_id=$PROJECT_ID" >> $GITHUB_OUTPUT
+          echo "region=$REGION" >> $GITHUB_OUTPUT
+          echo "zone=$ZONE" >> $GITHUB_OUTPUT
+          echo "repo=$REPO" >> $GITHUB_OUTPUT
+          echo "Detected Project: $PROJECT_ID"
+          echo "Detected Region: $REGION"
+          echo "Detected Zone: $ZONE"
+          echo "Repository: $REPO"
+
+      - name: Install gke-gcloud-auth-plugin
+        run: |
+          gcloud components install gke-gcloud-auth-plugin --quiet
+
+      - name: Set up kubectl
+        run: |
+          gcloud container clusters get-credentials ${{ env.GKE_CLUSTER }} \
+            --zone ${{ steps.gcp-config.outputs.zone }} \
+            --project ${{ steps.gcp-config.outputs.project_id }}
+
+      - name: Set environment variables
+        id: env-vars
+        run: |
+          ENV="dev"
+          NAMESPACE="microservices-${ENV}"
+          echo "namespace=${NAMESPACE}" >> $GITHUB_OUTPUT
+          echo "environment=${ENV}" >> $GITHUB_OUTPUT
+          echo "Deploying to environment: ${ENV}"
+          echo "Namespace: ${NAMESPACE}"
+
+      - name: Create namespace if not exists
+        run: |
+          kubectl create namespace ${{ steps.env-vars.outputs.namespace }} --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Generate .env files and Create/Update Secrets
+        run: |
+          ENV="dev"
+          NAMESPACE="${{ steps.env-vars.outputs.namespace }}"
+          
+          # Use environment-specific secrets if available, otherwise use default
+          POEM_SECRET_KEY="${{ secrets.POEM_API_SECRET_KEY_DEV || secrets.POEM_API_SECRET_KEY }}"
+          POEM_ADMIN_TOKEN="${{ secrets.POEM_ADMIN_TOKEN_DEV || secrets.POEM_ADMIN_TOKEN }}"
+          QUOTE_SECRET_KEY="${{ secrets.QUOTE_API_SECRET_KEY_DEV || secrets.QUOTE_API_SECRET_KEY }}"
+          QUOTE_ADMIN_TOKEN="${{ secrets.QUOTE_ADMIN_TOKEN_DEV || secrets.QUOTE_ADMIN_TOKEN }}"
+          
+          # Create .env file for poem service
+          cat > /tmp/poem.env << EOF
+          API_SECRET_KEY=${POEM_SECRET_KEY}
+          SERVICE_NAME=Poem Microservice
+          ADMIN_TOKEN=${POEM_ADMIN_TOKEN}
+          EOF
+          
+          # Create .env file for quote service
+          cat > /tmp/quote.env << EOF
+          API_SECRET_KEY=${QUOTE_SECRET_KEY}
+          SERVICE_NAME=Quote Microservice
+          ADMIN_TOKEN=${QUOTE_ADMIN_TOKEN}
+          EOF
+          
+          # Create secrets from .env files
+          kubectl create secret generic poem-secrets \
+            --from-env-file=/tmp/poem.env \
+            --namespace=${NAMESPACE} \
+            --dry-run=client -o yaml | kubectl apply -f -
+          
+          kubectl create secret generic quote-secrets \
+            --from-env-file=/tmp/quote.env \
+            --namespace=${NAMESPACE} \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Deploy to GKE
+        run: |
+          ENV="dev"
+          NAMESPACE="${{ steps.env-vars.outputs.namespace }}"
+          PROJECT_ID="${{ steps.gcp-config.outputs.project_id }}"
+          REGION="${{ steps.gcp-config.outputs.region }}"
+          REPO="${{ steps.gcp-config.outputs.repo }}"
+          TAG="${{ env.IMAGE_TAG }}"
+          
+          # Create temporary directory for environment-specific manifests
+          mkdir -p k8s-temp
+          cp -r k8s/* k8s-temp/
+          
+          # Replace placeholders in manifests
+          find k8s-temp -type f -name "*.yaml" -exec sed -i "s|IMAGE_TAG|${TAG}|g" {} \;
+          find k8s-temp -type f -name "*.yaml" -exec sed -i "s|PROJECT_ID|${PROJECT_ID}|g" {} \;
+          find k8s-temp -type f -name "*.yaml" -exec sed -i "s|REGION|${REGION}|g" {} \;
+          find k8s-temp -type f -name "*.yaml" -exec sed -i "s|NAMESPACE|${NAMESPACE}|g" {} \;
+          
+          # Apply manifests
+          kubectl apply -f k8s-temp/namespace.yaml
+          kubectl apply -f k8s-temp/configmap.yaml
+          kubectl apply -f k8s-temp/poem-deployment.yaml
+          kubectl apply -f k8s-temp/quote-deployment.yaml
+          kubectl apply -f k8s-temp/frontend-deployment.yaml
+          kubectl apply -f k8s-temp/ingress.yaml
+
+      - name: Verify deployment
+        run: |
+          NAMESPACE="${{ steps.env-vars.outputs.namespace }}"
+          kubectl rollout status deployment/poem-service -n ${NAMESPACE} --timeout=5m
+          kubectl rollout status deployment/quote-service -n ${NAMESPACE} --timeout=5m
+          kubectl rollout status deployment/frontend -n ${NAMESPACE} --timeout=5m
+          kubectl get pods -n ${NAMESPACE}
+          echo "✓ Deployment to dev environment completed successfully"
+
+#   deploy-stg:
+#     name: Deploy to Staging
+#     needs: build-and-push
+#     runs-on: ubuntu-latest
+#     if: github.event_name != 'pull_request'
+#     permissions:
+#       contents: read
+#       id-token: write  # Required for Workload Identity
+#     environment: 
+#       name: stg
+#       url: https://your-staging-url.com  # Update with your staging URL
+
+#     steps:
+#       - name: Checkout code
+#         uses: actions/checkout@v4
+
+#       - name: Authenticate to Google Cloud using Workload Identity
+#         uses: google-github-actions/auth@v2
+#         with:
+#           workload_identity_provider: ${{ env.WIF_PROVIDER }}
+#           service_account: ${{ env.WIF_SERVICE_ACCOUNT }}
+
+#       - name: Set up Cloud SDK
+#         uses: google-github-actions/setup-gcloud@v2
+
+#       - name: Get GCP Configuration
+#         id: gcp-config
+#         run: |
+#           PROJECT_ID=$(gcloud config get-value project)
+#           REGION=$(gcloud config get-value compute/region 2>/dev/null || echo "")
+#           ZONE=$(gcloud config get-value compute/zone 2>/dev/null || echo "")
+#           # Use env vars or defaults
+#           REGION=${REGION:-${{ env.REGION || 'us-central1' }}}
+#           ZONE=${ZONE:-${{ env.GKE_ZONE || 'us-central1-a' }}}
+#           REPO="${{ env.REPOSITORY || 'microservice-registery' }}"
+#           echo "project_id=$PROJECT_ID" >> $GITHUB_OUTPUT
+#           echo "region=$REGION" >> $GITHUB_OUTPUT
+#           echo "zone=$ZONE" >> $GITHUB_OUTPUT
+#           echo "repo=$REPO" >> $GITHUB_OUTPUT
+#           echo "Detected Project: $PROJECT_ID"
+#           echo "Detected Region: $REGION"
+#           echo "Detected Zone: $ZONE"
+#           echo "Repository: $REPO"
+
+#       - name: Install gke-gcloud-auth-plugin
+#         run: |
+#           gcloud components install gke-gcloud-auth-plugin --quiet
+
+#       - name: Set up kubectl
+#         run: |
+#           gcloud container clusters get-credentials ${{ env.GKE_CLUSTER }} \
+#             --zone ${{ steps.gcp-config.outputs.zone }} \
+#             --project ${{ steps.gcp-config.outputs.project_id }}
+
+#       - name: Set environment variables
+#         id: env-vars
+#         run: |
+#           ENV="stg"
+#           NAMESPACE="microservices-${ENV}"
+#           echo "namespace=${NAMESPACE}" >> $GITHUB_OUTPUT
+#           echo "environment=${ENV}" >> $GITHUB_OUTPUT
+#           echo "Deploying to environment: ${ENV}"
+#           echo "Namespace: ${NAMESPACE}"
+
+#       - name: Create namespace if not exists
+#         run: |
+#           kubectl create namespace ${{ steps.env-vars.outputs.namespace }} --dry-run=client -o yaml | kubectl apply -f -
+
+#       - name: Create/Update Secrets
+#         run: |
+#           ENV="stg"
+#           NAMESPACE="${{ steps.env-vars.outputs.namespace }}"
+          
+#           # Use environment-specific secrets if available, otherwise use default
+#           POEM_SECRET_KEY="${{ secrets.POEM_API_SECRET_KEY_STG || secrets.POEM_API_SECRET_KEY }}"
+#           POEM_ADMIN_TOKEN="${{ secrets.POEM_ADMIN_TOKEN_STG || secrets.POEM_ADMIN_TOKEN }}"
+#           QUOTE_SECRET_KEY="${{ secrets.QUOTE_API_SECRET_KEY_STG || secrets.QUOTE_API_SECRET_KEY }}"
+#           QUOTE_ADMIN_TOKEN="${{ secrets.QUOTE_ADMIN_TOKEN_STG || secrets.QUOTE_ADMIN_TOKEN }}"
+          
+#           kubectl create secret generic poem-secrets \
+#             --from-literal=API_SECRET_KEY="${POEM_SECRET_KEY}" \
+#             --from-literal=ADMIN_TOKEN="${POEM_ADMIN_TOKEN}" \
+#             --namespace=${NAMESPACE} \
+#             --dry-run=client -o yaml | kubectl apply -f -
+          
+#           kubectl create secret generic quote-secrets \
+#             --from-literal=API_SECRET_KEY="${QUOTE_SECRET_KEY}" \
+#             --from-literal=ADMIN_TOKEN="${QUOTE_ADMIN_TOKEN}" \
+#             --namespace=${NAMESPACE} \
+#             --dry-run=client -o yaml | kubectl apply -f -
+
+#       - name: Deploy to GKE
+#         run: |
+#           ENV="stg"
+#           NAMESPACE="${{ steps.env-vars.outputs.namespace }}"
+#           PROJECT_ID="${{ steps.gcp-config.outputs.project_id }}"
+#           REGION="${{ steps.gcp-config.outputs.region }}"
+#           REPO="${{ steps.gcp-config.outputs.repo }}"
+#           TAG="${{ env.IMAGE_TAG }}"
+          
+#           # Create temporary directory for environment-specific manifests
+#           mkdir -p k8s-temp
+#           cp -r k8s/* k8s-temp/
+          
+#           # Replace placeholders in manifests
+#           find k8s-temp -type f -name "*.yaml" -exec sed -i "s|IMAGE_TAG|${TAG}|g" {} \;
+#           find k8s-temp -type f -name "*.yaml" -exec sed -i "s|PROJECT_ID|${PROJECT_ID}|g" {} \;
+#           find k8s-temp -type f -name "*.yaml" -exec sed -i "s|REGION|${REGION}|g" {} \;
+#           find k8s-temp -type f -name "*.yaml" -exec sed -i "s|NAMESPACE|${NAMESPACE}|g" {} \;
+          
+#           # Apply manifests
+#           kubectl apply -f k8s-temp/namespace.yaml
+#           kubectl apply -f k8s-temp/secrets.yaml
+#           kubectl apply -f k8s-temp/configmap.yaml
+#           kubectl apply -f k8s-temp/poem-deployment.yaml
+#           kubectl apply -f k8s-temp/quote-deployment.yaml
+#           kubectl apply -f k8s-temp/frontend-deployment.yaml
+#           kubectl apply -f k8s-temp/ingress.yaml
+
+#       - name: Verify deployment
+#         run: |
+#           NAMESPACE="${{ steps.env-vars.outputs.namespace }}"
+#           kubectl rollout status deployment/poem-service -n ${NAMESPACE} --timeout=5m
+#           kubectl rollout status deployment/quote-service -n ${NAMESPACE} --timeout=5m
+#           kubectl rollout status deployment/frontend -n ${NAMESPACE} --timeout=5m
+#           kubectl get pods -n ${NAMESPACE}
+#           echo "✓ Deployment to staging environment completed successfully"
+
+  deploy-prd:
+    name: Deploy to Production
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      id-token: write  # Required for Workload Identity
+    environment: 
+      name: prd
+      url: https://your-production-url.com  # Update with your production URL
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud using Workload Identity
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Get GCP Configuration
+        id: gcp-config
+        run: |
+          PROJECT_ID=$(gcloud config get-value project)
+          REGION=$(gcloud config get-value compute/region 2>/dev/null || echo "")
+          ZONE=$(gcloud config get-value compute/zone 2>/dev/null || echo "")
+          # Use env vars or defaults
+          REGION=${REGION:-${{ env.REGION || 'us-central1' }}}
+          ZONE=${ZONE:-${{ env.GKE_ZONE || 'us-central1-a' }}}
+          REPO="${{ env.REPOSITORY || 'microservice-registery' }}"
+          echo "project_id=$PROJECT_ID" >> $GITHUB_OUTPUT
+          echo "region=$REGION" >> $GITHUB_OUTPUT
+          echo "zone=$ZONE" >> $GITHUB_OUTPUT
+          echo "repo=$REPO" >> $GITHUB_OUTPUT
+          echo "Detected Project: $PROJECT_ID"
+          echo "Detected Region: $REGION"
+          echo "Detected Zone: $ZONE"
+          echo "Repository: $REPO"
+
+      - name: Install gke-gcloud-auth-plugin
+        run: |
+          gcloud components install gke-gcloud-auth-plugin --quiet
+
+      - name: Set up kubectl
+        run: |
+          gcloud container clusters get-credentials ${{ env.GKE_CLUSTER }} \
+            --zone ${{ steps.gcp-config.outputs.zone }} \
+            --project ${{ steps.gcp-config.outputs.project_id }}
+
+      - name: Set environment variables
+        id: env-vars
+        run: |
+          ENV="prd"
+          NAMESPACE="microservices-${ENV}"
+          echo "namespace=${NAMESPACE}" >> $GITHUB_OUTPUT
+          echo "environment=${ENV}" >> $GITHUB_OUTPUT
+          echo "Deploying to environment: ${ENV}"
+          echo "Namespace: ${NAMESPACE}"
+
+      - name: Create namespace if not exists
+        run: |
+          kubectl create namespace ${{ steps.env-vars.outputs.namespace }} --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Generate .env files and Create/Update Secrets
+        run: |
+          ENV="prd"
+          NAMESPACE="${{ steps.env-vars.outputs.namespace }}"
+          
+          # Use environment-specific secrets if available, otherwise use default
+          POEM_SECRET_KEY="${{ secrets.POEM_API_SECRET_KEY_PRD || secrets.POEM_API_SECRET_KEY }}"
+          POEM_ADMIN_TOKEN="${{ secrets.POEM_ADMIN_TOKEN_PRD || secrets.POEM_ADMIN_TOKEN }}"
+          QUOTE_SECRET_KEY="${{ secrets.QUOTE_API_SECRET_KEY_PRD || secrets.QUOTE_API_SECRET_KEY }}"
+          QUOTE_ADMIN_TOKEN="${{ secrets.QUOTE_ADMIN_TOKEN_PRD || secrets.QUOTE_ADMIN_TOKEN }}"
+          
+          # Create .env file for poem service
+          cat > /tmp/poem.env << EOF
+          API_SECRET_KEY=${POEM_SECRET_KEY}
+          SERVICE_NAME=Poem Microservice
+          ADMIN_TOKEN=${POEM_ADMIN_TOKEN}
+          EOF
+          
+          # Create .env file for quote service
+          cat > /tmp/quote.env << EOF
+          API_SECRET_KEY=${QUOTE_SECRET_KEY}
+          SERVICE_NAME=Quote Microservice
+          ADMIN_TOKEN=${QUOTE_ADMIN_TOKEN}
+          EOF
+          
+          # Create secrets from .env files
+          kubectl create secret generic poem-secrets \
+            --from-env-file=/tmp/poem.env \
+            --namespace=${NAMESPACE} \
+            --dry-run=client -o yaml | kubectl apply -f -
+          
+          kubectl create secret generic quote-secrets \
+            --from-env-file=/tmp/quote.env \
+            --namespace=${NAMESPACE} \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Deploy to GKE
+        run: |
+          ENV="prd"
+          NAMESPACE="${{ steps.env-vars.outputs.namespace }}"
+          PROJECT_ID="${{ steps.gcp-config.outputs.project_id }}"
+          REGION="${{ steps.gcp-config.outputs.region }}"
+          REPO="${{ steps.gcp-config.outputs.repo }}"
+          TAG="${{ env.IMAGE_TAG }}"
+          
+          # Create temporary directory for environment-specific manifests
+          mkdir -p k8s-temp
+          cp -r k8s/* k8s-temp/
+          
+          # Replace placeholders in manifests
+          find k8s-temp -type f -name "*.yaml" -exec sed -i "s|IMAGE_TAG|${TAG}|g" {} \;
+          find k8s-temp -type f -name "*.yaml" -exec sed -i "s|PROJECT_ID|${PROJECT_ID}|g" {} \;
+          find k8s-temp -type f -name "*.yaml" -exec sed -i "s|REGION|${REGION}|g" {} \;
+          find k8s-temp -type f -name "*.yaml" -exec sed -i "s|NAMESPACE|${NAMESPACE}|g" {} \;
+          
+          # Apply manifests
+          kubectl apply -f k8s-temp/namespace.yaml
+          kubectl apply -f k8s-temp/configmap.yaml
+          kubectl apply -f k8s-temp/poem-deployment.yaml
+          kubectl apply -f k8s-temp/quote-deployment.yaml
+          kubectl apply -f k8s-temp/frontend-deployment.yaml
+          kubectl apply -f k8s-temp/ingress.yaml
+
+      - name: Verify deployment
+        run: |
+          NAMESPACE="${{ steps.env-vars.outputs.namespace }}"
+          kubectl rollout status deployment/poem-service -n ${NAMESPACE} --timeout=5m
+          kubectl rollout status deployment/quote-service -n ${NAMESPACE} --timeout=5m
+          kubectl rollout status deployment/frontend -n ${NAMESPACE} --timeout=5m
+          kubectl get pods -n ${NAMESPACE}
+          echo "✓ Deployment to production environment completed successfully"
