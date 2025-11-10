@@ -393,7 +393,7 @@ jobs:
 #           kubectl get pods -n ${NAMESPACE}
 #           echo "✓ Deployment to staging environment completed successfully"
 
-#   deploy-prd:
+  deploy-prd:
     name: Deploy to Production
     needs: build-and-push
     runs-on: ubuntu-latest
