@@ -25,6 +25,11 @@ patches:
 - path: configmap-patch.yaml
   target:
     kind: ConfigMap
+    name: poem-config
+- path: quote-configmap-patch.yaml
+  target:
+    kind: ConfigMap
+    name: quote-config
 replicas:
 - name: poem-service
   count: 2
