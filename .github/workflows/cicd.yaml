@@ -68,3 +68,36 @@ jobs:
           docker tag ${IMAGE_URI}:${{ env.IMAGE_TAG }} ${IMAGE_URI}:latest
           docker push ${IMAGE_URI}:${{ env.IMAGE_TAG }}
           docker push ${IMAGE_URI}:latest
+  update-gitops:
+    name: Update GitOps Repository (Trigger ArgoCD)
+    needs: build-and-push
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout GitOps repo
+        uses: actions/checkout@v4
+        with:
+          repository: sajjadkhan12/gitops-deployment # 👈 Replace with your GitOps repo
+          token: ${{ secrets.PERSONAL_ACCESS_TOKEN }} # create a PAT or use a fine-grained token
+          path: gitops
+
+      - name: Install yq (YAML CLI)
+        run: sudo apt-get install -y yq
+
+      - name: Update image tags in dev environment
+        run: |
+          cd gitops/environments/dev
+          TAG=${{ env.IMAGE_TAG }}
+          # Update image tags for each service
+          yq e -i '.images[] |= select(.name == "us-central1-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/poem-service").newTag = strenv(TAG)' kustomization.yaml
+          yq e -i '.images[] |= select(.name == "us-central1-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/quote-service").newTag = strenv(TAG)' kustomization.yaml
+          yq e -i '.images[] |= select(.name == "us-central1-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/frontend").newTag = strenv(TAG)' kustomization.yaml
+
+      - name: Commit and push changes
+        run: |
+          cd gitops
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add .
+          git commit -m "Update image tags to ${{ env.IMAGE_TAG }}"
+          git push
