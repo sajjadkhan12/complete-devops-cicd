@@ -84,7 +84,11 @@ jobs:
           path: gitops
 
       - name: Install yq (YAML CLI)
-        run: sudo apt-get install -y yq
+        run: |
+          sudo apt-get install -y yq
+          # Install Mike Farah's yq v4 (supports -i without -y)
+          YQ_BIN=/usr/local/bin/yq
+          wget -qO $YQ_BIN
 
       - name: Update image tags in dev environment
         run: |
