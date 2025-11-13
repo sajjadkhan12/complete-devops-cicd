@@ -34,7 +34,7 @@
             <div class="author">— {{ quote.author }}</div>
             <span class="category">{{ quote.category }}</span>
           </div>
-          <div v-else>Click the button to get a random quote!</div>
+          <div v-else>Click the button to get a random quote!!</div>
         </div>
       </div>
     </div>
