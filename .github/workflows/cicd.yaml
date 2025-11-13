@@ -88,7 +88,8 @@ jobs:
           sudo apt-get install -y yq
           # Install Mike Farah's yq v4 (supports -i without -y)
           YQ_BIN=/usr/local/bin/yq
-          wget -qO $YQ_BIN
+          wget -qO $YQ_BIN https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          chmod +x $YQ_BIN
 
       - name: Update image tags in dev environment
         run: |
